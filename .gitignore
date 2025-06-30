@@ -1,0 +1,30 @@
+
+---
+
+# ✅ **`.gitignore` File**
+
+```plaintext
+# Ignore environment files
+key.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# System files
+.DS_Store
+
+---
+
+# ✅ **`.gitignore` File**
+
+```plaintext
+# Ignore environment files
+key.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# System files
+.DS_Store
