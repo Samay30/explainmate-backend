@@ -1,5 +1,7 @@
 # ---------------- main.py (Updated Backend with FastAPI) ----------------
 
+# ---------------- Optimized Backend for Render Deployment ----------------
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,19 +12,16 @@ import requests
 import traceback
 import tempfile
 import time
-import whisper
-from elevenlabs.client import ElevenLabs
-from elevenlabs import VoiceSettings
 import ssl
 
-ssl._create_default_https_context = ssl._create_unverified_context
+# Optional: Uncomment for local SSL bypass only
+#if os.environ.get("SKIP_SSL_VERIFY") == "1":
+#    ssl._create_default_https_context = ssl._create_unverified_context
 
-# Load environment variables
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "key.env"))
 
 app = FastAPI()
 
-# CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,18 +30,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Whisper ASR model
-model = whisper.load_model("base")  # You can switch to "medium" for better accuracy
-
-# ElevenLabs voice mapping
 VOICE_NAME_TO_ID = {
     "Rachelle": "ZT9u07TYPVl83ejeLakq",
     "Rachel": "21m00Tcm4TlvDq8ikWAM",
     "Bella": "EXAVITQu4vr4xnSDxMaL",
     "Domi": "AZnzlk1XvdvUeBnXmlld"
 }
-
-# ---------------- API Models ----------------
 
 class CodeInput(BaseModel):
     code: str
@@ -56,46 +49,39 @@ class FollowUpInput(BaseModel):
     explanation: str
     code: str
 
-# ---------------- Utility Functions ----------------
-
 def speak_text(text: str, voice: str = "Rachel") -> str:
-    try:
-        start_time = time.time()
-        client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-        voice_id = VOICE_NAME_TO_ID.get(voice, voice)
+    from elevenlabs.client import ElevenLabs
+    from elevenlabs import VoiceSettings
 
-        audio_stream = client.text_to_speech.convert(
-            text=text,
-            voice_id=voice_id,
-            model_id="eleven_turbo_v2_5",
-            output_format="mp3_44100_128",
-            voice_settings=VoiceSettings(
-                stability=0.75,
-                similarity_boost=0.75,
-                style=0.0,
-                use_speaker_boost=True
-            )
+    start_time = time.time()
+    client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+    voice_id = VOICE_NAME_TO_ID.get(voice, voice)
+
+    audio_stream = client.text_to_speech.convert(
+        text=text,
+        voice_id=voice_id,
+        model_id="eleven_turbo_v2_5",
+        output_format="mp3_44100_128",
+        voice_settings=VoiceSettings(
+            stability=0.75,
+            similarity_boost=0.75,
+            style=0.0,
+            use_speaker_boost=True
         )
+    )
 
-        audio_bytes = b"".join(audio_stream)
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        temp_file.write(audio_bytes)
-        temp_file.close()
+    audio_bytes = b"".join(audio_stream)
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    temp_file.write(audio_bytes)
+    temp_file.close()
 
-        print(f"[✅] Audio generated in {time.time() - start_time:.2f} seconds")
-        return temp_file.name
-
-    except Exception as e:
-        print("🛑 ElevenLabs TTS Error:", str(e))
-        raise RuntimeError(f"Text-to-speech failed: {str(e)}")
-
-# ---------------- API Endpoints ----------------
+    print(f"[✅] Audio generated in {time.time() - start_time:.2f} seconds")
+    return temp_file.name
 
 @app.post("/explain")
 def explain_code(payload: CodeInput):
     try:
         start_time = time.time()
-
         code_lines = []
         depth = "beginner"
         fmt = "default"
@@ -110,21 +96,19 @@ def explain_code(payload: CodeInput):
 
         code = "\n".join(code_lines)
 
-        if payload.mode == "eli5":
-            format_prompt = "Explain this code simply and briefly in 300 words, as if to a 5-year-old."
-        elif payload.mode == "spoken":
-            format_prompt = "Summarize this code in 300 words in a conversational, natural tone."
-        else:
-            format_prompt = f"Explain the code in {depth}-level terms with a concise, spoken-friendly explanation in 300 words."
+        format_prompt = {
+            "eli5": "Explain this code simply and briefly in 300 words, as if to a 5-year-old.",
+            "spoken": "Summarize this code in 300 words in a conversational, natural tone."
+        }.get(payload.mode, f"Explain the code in {depth}-level terms with a concise, spoken-friendly explanation in 300 words.")
 
         prompt = f"{format_prompt}\n\n{code}"
 
-        print("[📤] Sending prompt to Together.ai:\n", prompt)
+        print("[📤] Sending prompt to Together.ai:", prompt)
 
         response = requests.post(
             "https://api.together.xyz/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {os.getenv('TOGETHER_API_KEY')}",
+                "Authorization": f"Bearer {os.environ['TOGETHER_API_KEY']}",
                 "Content-Type": "application/json"
             },
             json={
@@ -136,14 +120,12 @@ def explain_code(payload: CodeInput):
             verify=False
         )
 
-        result = response.json()
-        explanation = result.get("choices", [{}])[0].get("message", {}).get("content", "Sorry, no explanation generated.")
+        explanation = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Sorry, no explanation generated.")
 
         print(f"[✅] Explanation generated in {time.time() - start_time:.2f} seconds")
         return {"explanation": explanation}
 
     except Exception as e:
-        print("[❌] Error in /explain:", e)
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -155,7 +137,7 @@ def speak_code(payload: CodeInput):
         return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
 
     except Exception as e:
-        print("[❌] Error in /speak:", e)
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/ask")
@@ -171,7 +153,7 @@ def ask_followup(input: FollowUpInput):
         response = requests.post(
             "https://api.together.xyz/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {os.getenv('TOGETHER_API_KEY')}",
+                "Authorization": f"Bearer {os.environ['TOGETHER_API_KEY']}",
                 "Content-Type": "application/json"
             },
             json={
@@ -183,31 +165,15 @@ def ask_followup(input: FollowUpInput):
             verify=False
         )
 
-        result = response.json()
-        answer = result.get("choices", [{}])[0].get("message", {}).get("content", "Sorry, no answer generated.")
+        answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Sorry, no answer generated.")
         return {"answer": answer}
 
     except Exception as e:
-        print("[❌] Error in /ask:", e)
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.post("/transcribe")
-def transcribe_question(audio: UploadFile = File(...)):
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio.file.read())
-            tmp_path = tmp.name
-
-        print(f"[🎙️] Transcribing {tmp_path}")
-        result = model.transcribe(tmp_path)
-        return {"transcript": result["text"]}
-
-    except Exception as e:
-        print("[❌] Error in /transcribe:", e)
-        traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+# Optional Whisper section removed for lightweight deployment. Recommend splitting to AWS Lambda.
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
