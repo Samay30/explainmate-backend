@@ -1,0 +1,11 @@
+pydantic
+fastapi
+pydantic
+uvicorn
+requests
+gtts
+firebase-admin
+stripe
+python-dotenv
+elevenlabs
+
