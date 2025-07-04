@@ -97,8 +97,8 @@ def explain_code(payload: CodeInput):
         code = "\n".join(code_lines)
 
         format_prompt = {
-            "eli5": "Explain this code simply and briefly in 300 words, as if to a 5-year-old.",
-            "spoken": "Summarize this code in 300 words in a conversational, natural tone."
+            "eli5": "Explain this code simply and briefly in 150 words, as if to a 5-year-old.",
+            "spoken": "Summarize this code in 150 words in a conversational, natural tone."
         }.get(payload.mode, f"Explain the code in {depth}-level terms with a concise, spoken-friendly explanation in 300 words.")
 
         prompt = f"{format_prompt}\n\n{code}"
