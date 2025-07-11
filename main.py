@@ -13,10 +13,11 @@ import traceback
 import tempfile
 import time
 import ssl
+import re
 
 # Optional: Uncomment for local SSL bypass only
-#if os.environ.get("SKIP_SSL_VERIFY") == "1":
-#    ssl._create_default_https_context = ssl._create_unverified_context
+# if os.environ.get("SKIP_SSL_VERIFY") == "1":
+#     ssl._create_default_https_context = ssl._create_unverified_context
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "key.env"))
 
@@ -32,14 +33,13 @@ app.add_middleware(
 
 VOICE_NAME_TO_ID = {
     "Rachelle": "ZT9u07TYPVl83ejeLakq",
-    
 }
 
 class CodeInput(BaseModel):
     code: str
     language: str = "en"
-    speed: float = 1.0
-    voice: str = "default"
+    speed: float = 0.85
+    voice: str = "Rachelle"
     mode: str = "default"
 
 class FollowUpInput(BaseModel):
@@ -47,11 +47,28 @@ class FollowUpInput(BaseModel):
     explanation: str
     code: str
 
-def speak_text(text: str, voice: str = "Rachelle") -> str:
+
+def clean_for_tts(text: str) -> str:
+    sentences = re.split(r'(?<=[.!?])\s+', text)[:5]
+    text = ' '.join(sentences)
+    text = re.sub(r"[`_*#~\[\]{}<>]", "", text)
+    text = re.sub(r"[^\w\s.,!?\'\"()\-]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+def add_silent_markers(text: str, words_per_break: int = 12) -> str:
+    words = text.split()
+    out = []
+    for i, w in enumerate(words):
+        if i and i % words_per_break == 0:
+            out.append("...")
+        out.append(w)
+    return " ".join(out)
+
+def speak_text(text: str, voice: str = "Rachelle", speed: float = 0.85) -> str:
     from elevenlabs.client import ElevenLabs
     from elevenlabs import VoiceSettings
 
-    start_time = time.time()
     client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
     voice_id = VOICE_NAME_TO_ID.get(voice, voice)
 
@@ -64,7 +81,8 @@ def speak_text(text: str, voice: str = "Rachelle") -> str:
             stability=0.75,
             similarity_boost=0.75,
             style=0.0,
-            use_speaker_boost=True
+            use_speaker_boost=True,
+            speed=speed
         )
     )
 
@@ -73,7 +91,6 @@ def speak_text(text: str, voice: str = "Rachelle") -> str:
     temp_file.write(audio_bytes)
     temp_file.close()
 
-    print(f"[✅] Audio generated in {time.time() - start_time:.2f} seconds")
     return temp_file.name
 
 @app.post("/explain")
@@ -101,8 +118,6 @@ def explain_code(payload: CodeInput):
 
         prompt = f"{format_prompt}\n\n{code}"
 
-        print("[📤] Sending prompt to Together.ai:", prompt)
-
         response = requests.post(
             "https://api.together.xyz/v1/chat/completions",
             headers={
@@ -119,27 +134,18 @@ def explain_code(payload: CodeInput):
         )
 
         explanation = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Sorry, no explanation generated.")
-
-        print(f"[✅] Explanation generated in {time.time() - start_time:.2f} seconds")
         return {"explanation": explanation}
 
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# In backend main.py, speak_code function:
 @app.post("/speak")
 def speak_code(payload: CodeInput):
-        # Add synchronization markers every 5 words
-        words = payload.code.split()
-        marked_text = ""
-        for i, word in enumerate(words):
-            if i % 5 == 0 and i > 0:
-                marked_text += " § "  # Sync marker
-            marked_text += word + " "
-        
-        audio_path = speak_text(marked_text.strip(), payload.voice)
-        return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
+    clean_text = clean_for_tts(payload.code)
+    final_text = add_silent_markers(clean_text, words_per_break=12)
+    audio_path = speak_text(final_text, voice=payload.voice, speed=payload.speed)
+    return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
 
 @app.post("/ask")
 def ask_followup(input: FollowUpInput):
@@ -172,8 +178,6 @@ def ask_followup(input: FollowUpInput):
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
-
-# Optional Whisper section removed for lightweight deployment. Recommend splitting to AWS Lambda.
 
 if __name__ == "__main__":
     import uvicorn
