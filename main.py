@@ -143,7 +143,7 @@ def explain_code(payload: CodeInput):
 @app.post("/speak")
 def speak_code(payload: CodeInput):
     clean_text = clean_for_tts(payload.code)
-    final_text = add_silent_markers(clean_text)
+    final_text = add_silent_markers(clean_text,words_per_break=12)
     audio_path = speak_text(final_text, voice=payload.voice, speed=payload.speed)
     return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
 
