@@ -85,9 +85,12 @@ def speak_text(text: str, voice: str = "Rachelle", speed: float = 0.85) -> str:
 
     client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
     voice_id = VOICE_NAME_TO_ID.get(voice, voice)
-    chunks = split_text(text)
 
-    audio_bytes = b""
+    # 1. Clean and slice text into logical 700-char chunks
+    chunks = split_text(clean_for_tts(text), max_len=700)
+
+    # 2. Collect audio bytes from each chunk
+    combined_audio = b""
     for chunk in chunks:
         stream = client.text_to_speech.convert(
             text=chunk,
@@ -102,10 +105,14 @@ def speak_text(text: str, voice: str = "Rachelle", speed: float = 0.85) -> str:
                 speed=speed
             )
         )
-        audio_bytes += b"".join(stream)
 
+        # Safely consume stream completely
+        for part in stream:
+            combined_audio += part
+
+    # 3. Write audio to temp file
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    temp_file.write(audio_bytes)
+    temp_file.write(combined_audio)
     temp_file.close()
 
     return temp_file.name
@@ -160,7 +167,7 @@ def explain_code(payload: CodeInput):
 @app.post("/speak")
 def speak_code(payload: CodeInput):
     clean_text = clean_for_tts(payload.code)
-    final_text = add_silent_markers(clean_text,words_per_break=12)
+    final_text = clean_for_tts(payload.code)
     audio_path = speak_text(final_text, voice=payload.voice, speed=payload.speed)
     return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
 
