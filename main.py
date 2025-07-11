@@ -112,7 +112,7 @@ def explain_code(payload: CodeInput):
         code = "\n".join(code_lines)
 
         format_prompt = {
-            "eli5": "Explain this code simply and briefly in 150 words, as if to a 5-year-old.",
+            "eli5": "Explain this code simply and briefly in 150 words, as if to a 5-year-old in a conversational tone.",
             "spoken": "Summarize this code in 150 words in a conversational, natural tone."
         }.get(payload.mode, f"Explain the code in {depth}-level terms with a concise, spoken-friendly explanation in 300 words.")
 
@@ -143,7 +143,7 @@ def explain_code(payload: CodeInput):
 @app.post("/speak")
 def speak_code(payload: CodeInput):
     clean_text = clean_for_tts(payload.code)
-    final_text = add_silent_markers(clean_text, words_per_break=12)
+    final_text = add_silent_markers(clean_text)
     audio_path = speak_text(final_text, voice=payload.voice, speed=payload.speed)
     return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
 
@@ -165,7 +165,7 @@ def ask_followup(input: FollowUpInput):
             },
             json={
                 "model": "mistralai/Mistral-7B-Instruct-v0.2",
-                "max_tokens": 300,
+                "max_tokens": 650,
                 "temperature": 0.4,
                 "messages": [{"role": "user", "content": prompt}]
             },
