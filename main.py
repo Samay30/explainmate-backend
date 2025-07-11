@@ -32,9 +32,7 @@ app.add_middleware(
 
 VOICE_NAME_TO_ID = {
     "Rachelle": "ZT9u07TYPVl83ejeLakq",
-    "Rachel": "21m00Tcm4TlvDq8ikWAM",
-    "Bella": "EXAVITQu4vr4xnSDxMaL",
-    "Domi": "AZnzlk1XvdvUeBnXmlld"
+    
 }
 
 class CodeInput(BaseModel):
@@ -49,7 +47,7 @@ class FollowUpInput(BaseModel):
     explanation: str
     code: str
 
-def speak_text(text: str, voice: str = "Rachel") -> str:
+def speak_text(text: str, voice: str = "Rachelle") -> str:
     from elevenlabs.client import ElevenLabs
     from elevenlabs import VoiceSettings
 
