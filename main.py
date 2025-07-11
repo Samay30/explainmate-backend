@@ -47,6 +47,20 @@ class FollowUpInput(BaseModel):
     explanation: str
     code: str
 
+def split_text(text: str, max_len: int = 700):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks = []
+    current = ""
+
+    for sentence in sentences:
+        if len(current) + len(sentence) < max_len:
+            current += " " + sentence
+        else:
+            chunks.append(current.strip())
+            current = sentence
+    if current:
+        chunks.append(current.strip())
+    return chunks
 
 def clean_for_tts(text: str) -> str:
     sentences = re.split(r'(?<=[.!?])\s+', text)[:5]
@@ -71,22 +85,25 @@ def speak_text(text: str, voice: str = "Rachelle", speed: float = 0.85) -> str:
 
     client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
     voice_id = VOICE_NAME_TO_ID.get(voice, voice)
+    chunks = split_text(text)
 
-    audio_stream = client.text_to_speech.convert(
-        text=text,
-        voice_id=voice_id,
-        model_id="eleven_turbo_v2_5",
-        output_format="mp3_44100_128",
-        voice_settings=VoiceSettings(
-            stability=0.75,
-            similarity_boost=0.75,
-            style=0.0,
-            use_speaker_boost=True,
-            speed=speed
+    audio_bytes = b""
+    for chunk in chunks:
+        stream = client.text_to_speech.convert(
+            text=chunk,
+            voice_id=voice_id,
+            model_id="eleven_turbo_v2_5",
+            output_format="mp3_44100_128",
+            voice_settings=VoiceSettings(
+                stability=0.75,
+                similarity_boost=0.75,
+                style=0.0,
+                use_speaker_boost=True,
+                speed=speed
+            )
         )
-    )
+        audio_bytes += b"".join(stream)
 
-    audio_bytes = b"".join(audio_stream)
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
     temp_file.write(audio_bytes)
     temp_file.close()
