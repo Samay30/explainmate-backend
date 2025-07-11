@@ -129,16 +129,19 @@ def explain_code(payload: CodeInput):
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+# In backend main.py, speak_code function:
 @app.post("/speak")
 def speak_code(payload: CodeInput):
-    try:
-        print("📥 Received for TTS:", payload.dict())
-        audio_path = speak_text(payload.code, payload.voice)
+        # Add synchronization markers every 5 words
+        words = payload.code.split()
+        marked_text = ""
+        for i, word in enumerate(words):
+            if i % 5 == 0 and i > 0:
+                marked_text += " § "  # Sync marker
+            marked_text += word + " "
+        
+        audio_path = speak_text(marked_text.strip(), payload.voice)
         return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
-
-    except Exception as e:
-        traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/ask")
 def ask_followup(input: FollowUpInput):
