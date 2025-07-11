@@ -1,218 +1,179 @@
-from flask import Flask, request, send_file, jsonify
-from flask_cors import CORS
-import logging
+# ---------------- main.py (Updated Backend with FastAPI) ----------------
+
+# ---------------- Optimized Backend for Render Deployment ----------------
+
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
 import os
 import requests
-import spacy
-import networkx as nx
-import json
-from dotenv import load_dotenv
-import textstat
-import openai
+import traceback
+import tempfile
 import time
-import io
-import re
+import ssl
 
-load_dotenv()
+# Optional: Uncomment for local SSL bypass only
+#if os.environ.get("SKIP_SSL_VERIFY") == "1":
+#    ssl._create_default_https_context = ssl._create_unverified_context
 
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "key.env"))
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = FastAPI()
 
-# Load NLP Model
-nlp = spacy.load("en_core_web_sm")
-graph = nx.DiGraph()  # Mind Map Graph
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# ElevenLabs Configuration
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-# More expressive voices
-VOICES = {
-    "encouraging_female": "EXAVITQu4vr4xnSDxMaL",  # Bella - expressive
-    "warm_male": "VR6AewLTigWG4xSOukaG",           # Antonio - warm tone
-    "enthusiastic": "AZnzlk1XvdvUeBnXmlld",        # Domi - enthusiastic
-    "calm": "IKne3meq5aSn9XLyUdCD"                  # Josh - calm and clear
+VOICE_NAME_TO_ID = {
+    "Rachelle": "ZT9u07TYPVl83ejeLakq",
+    "Rachel": "21m00Tcm4TlvDq8ikWAM",
+    "Bella": "EXAVITQu4vr4xnSDxMaL",
+    "Domi": "AZnzlk1XvdvUeBnXmlld"
 }
-DEFAULT_VOICE = "encouraging_female"
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# API Endpoints
-CONCEPTNET_API = "https://api.conceptnet.io/query?node=/c/en/{}&rel=/r/RelatedTo&limit=20"
-DBPEDIA_API = "http://dbpedia.org/sparql"
-WIKIDATA_API = "https://www.wikidata.org/w/api.php"
+class CodeInput(BaseModel):
+    code: str
+    language: str = "en"
+    speed: float = 1.0
+    voice: str = "default"
+    mode: str = "default"
 
-# 🔥 Expanded Concept Relations Dataset
-concept_relations = {}
+class FollowUpInput(BaseModel):
+    question: str
+    explanation: str
+    code: str
 
-MAX_ATTEMPTS = 5
-SUMMARY_MAX_WORDS = 120  # Increased token limit
-READABILITY_THRESHOLD = 85
-MAX_TEXT_LENGTH = 1000  # ElevenLabs character limit
+def speak_text(text: str, voice: str = "Rachel") -> str:
+    from elevenlabs.client import ElevenLabs
+    from elevenlabs import VoiceSettings
 
-# ... (rest of helper functions remain unchanged) ...
+    start_time = time.time()
+    client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+    voice_id = VOICE_NAME_TO_ID.get(voice, voice)
 
-def complete_sentence(text):
-    """Ensure the summary ends with a complete sentence"""
-    if not text:
-        return text
-    
-    # Check if text ends with proper punctuation
-    if re.search(r'[.!?]$', text):
-        return text
-    
-    # Find last punctuation mark
-    last_punct = max(text.rfind('.'), text.rfind('!'), text.rfind('?'))
-    if last_punct > 0:
-        return text[:last_punct + 1]
-    
-    # If no punctuation, add period
-    return text + '.'
-
-# Summarization parameters
-@app.route('/api/summarize', methods=['POST'])
-def summarize():
-    """GPT-4o Summarization optimized for dyslexic users"""
-    data = request.get_json()
-    input_text = data.get("text", "").strip()
-
-    if not input_text:
-        return jsonify({"error": "No text provided."}), 400
-
-    try:
-        # Truncate very long text to avoid token limits
-        if len(input_text) > 10000:
-            input_text = input_text[:10000] + " [TEXT TRUNCATED]"
-        
-        prompt_template = (
-            "You are a helpful assistant. Summarize the article below in a way that is very easy to read. "
-            "Use ultra-short, simple sentences. Use words suitable for someone with dyslexia. Also give topic overview"
-            "Avoid difficult vocabulary or long paragraphs. Make sure to complete all sentences.\n\n"
-            "Example:\n"
-            "Text: Scientists discovered a new planet that might support life.\n"
-            "Summary: A new planet was found. It may have life.\n\n"
-            f"Now summarize this article:\n{input_text}\n\nSummary:"
+    audio_stream = client.text_to_speech.convert(
+        text=text,
+        voice_id=voice_id,
+        model_id="eleven_turbo_v2_5",
+        output_format="mp3_44100_128",
+        voice_settings=VoiceSettings(
+            stability=0.75,
+            similarity_boost=0.75,
+            style=0.0,
+            use_speaker_boost=True
         )
+    )
 
-        # Try generating a readable summary within MAX_ATTEMPTS
-        for attempt in range(MAX_ATTEMPTS):
-            try:
-                response = openai.ChatCompletion.create(
-                    model="gpt-4o",
-                    messages=[{"role": "user", "content": prompt_template}],
-                    temperature=0.5,
-                    max_tokens=SUMMARY_MAX_WORDS
-                )
-                summary = response.choices[0].message.content.strip()
-                # Ensure sentence completion
-                summary = complete_sentence(summary)
-                readability = textstat.flesch_reading_ease(summary)
+    audio_bytes = b"".join(audio_stream)
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    temp_file.write(audio_bytes)
+    temp_file.close()
 
-                if readability >= READABILITY_THRESHOLD or attempt == MAX_ATTEMPTS - 1:
-                    return jsonify({
-                        "summary_text": summary,
-                        "readability": readability,
-                        "attempts": attempt + 1
-                    })
+    print(f"[✅] Audio generated in {time.time() - start_time:.2f} seconds")
+    return temp_file.name
 
-                time.sleep(1)
-
-            except openai.error.OpenAIError as e:
-                logger.error(f"OpenAI API error: {str(e)}")
-                return jsonify({"error": f"OpenAI error: {str(e)}"}), 500
-            except Exception as e:
-                logger.error(f"Unexpected error: {str(e)}")
-                return jsonify({"error": "Internal server error"}), 500
-
-        return jsonify({"error": "Failed to generate readable summary"}), 500
-    except Exception as e:
-        logger.exception("Unexpected error in summarization")
-        return jsonify({"error": "Internal server error"}), 500
-
-
-@app.route("/api/synthesize", methods=["POST"])
-def synthesize():
-    data = request.get_json()
-    text = data.get("text", "").strip()
-    voice_type = data.get("voice", DEFAULT_VOICE)
-    
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
-    
-    if not ELEVENLABS_API_KEY:
-        logger.error("ElevenLabs API key not configured")
-        return jsonify({"error": "Server configuration error"}), 500
-    
+@app.post("/explain")
+def explain_code(payload: CodeInput):
     try:
-        # Select voice
-        voice_id = VOICES.get(voice_type, VOICES[DEFAULT_VOICE])
-        
-        # Truncate text to ElevenLabs limits
-        if len(text) > MAX_TEXT_LENGTH:
-            logger.warning(f"Truncating text from {len(text)} to {MAX_TEXT_LENGTH} characters")
-            text = text[:MAX_TEXT_LENGTH]
-        
-        logger.info(f"Synthesizing text with ElevenLabs using voice {voice_type} ({voice_id})")
-        
-        # Add encouraging prefix for short summaries
-        if len(text) < 100:
-            text = "Great job! " + text + " Keep up the good work!"
-        
-        # Voice style settings based on emotion
-        style_settings = {
-            "encouraging_female": {"stability": 0.35, "similarity_boost": 0.85, "style": 0.8},
-            "warm_male": {"stability": 0.4, "similarity_boost": 0.9, "style": 0.6},
-            "enthusiastic": {"stability": 0.25, "similarity_boost": 0.8, "style": 0.95},
-            "calm": {"stability": 0.5, "similarity_boost": 0.95, "style": 0.3}
-        }
-        style = style_settings.get(voice_type, style_settings[DEFAULT_VOICE])
-        
-        payload = {
-            "text": text,
-            "model_id": "eleven_turbo_v2",  # More expressive model
-            "voice_settings": {
-                "stability": style["stability"],
-                "similarity_boost": style["similarity_boost"],
-                "style": style["style"],
-                "use_speaker_boost": True
-            }
-        }
-        
+        start_time = time.time()
+        code_lines = []
+        depth = "beginner"
+        fmt = "default"
+
+        for line in payload.code.splitlines():
+            if line.startswith("Depth:"):
+                depth = line.replace("Depth:", "").strip()
+            elif line.startswith("Format:"):
+                fmt = line.replace("Format:", "").strip()
+            else:
+                code_lines.append(line)
+
+        code = "\n".join(code_lines)
+
+        format_prompt = {
+            "eli5": "Explain this code simply and briefly in 150 words, as if to a 5-year-old.",
+            "spoken": "Summarize this code in 150 words in a conversational, natural tone."
+        }.get(payload.mode, f"Explain the code in {depth}-level terms with a concise, spoken-friendly explanation in 300 words.")
+
+        prompt = f"{format_prompt}\n\n{code}"
+
+        print("[📤] Sending prompt to Together.ai:", prompt)
+
         response = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            "https://api.together.xyz/v1/chat/completions",
             headers={
-                "xi-api-key": ELEVENLABS_API_KEY,
-                "Content-Type": "application/json",
-                "Accept": "audio/mpeg"
+                "Authorization": f"Bearer {os.environ['TOGETHER_API_KEY']}",
+                "Content-Type": "application/json"
             },
-            json=payload,
-            timeout=30
+            json={
+                "model": "mistralai/Mistral-7B-Instruct-v0.2",
+                "max_tokens": 400,
+                "temperature": 0.3,
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            verify=False
         )
-        
-        if response.status_code != 200:
-            error_msg = f"ElevenLabs API error: {response.status_code} - {response.text}"
-            logger.error(error_msg)
-            return jsonify({"error": error_msg}), 500
-        
-        # Create in-memory audio file
-        audio_buffer = io.BytesIO(response.content)
-        audio_buffer.seek(0)
-        
-        return send_file(
-            audio_buffer,
-            mimetype='audio/mpeg',
-            as_attachment=False
-        )
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Network error: {str(e)}")
-        return jsonify({"error": f"Network error: {str(e)}"}), 500
+
+        explanation = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Sorry, no explanation generated.")
+
+        print(f"[✅] Explanation generated in {time.time() - start_time:.2f} seconds")
+        return {"explanation": explanation}
+
     except Exception as e:
-        logger.exception("Unexpected error in TTS")
-        return jsonify({"error": f"TTS Failed: {str(e)}"}), 500
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-# ... (rest of the endpoints remain unchanged) ...
+@app.post("/speak")
+def speak_code(payload: CodeInput):
+    try:
+        print("📥 Received for TTS:", payload.dict())
+        audio_path = speak_text(payload.code, payload.voice)
+        return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/ask")
+def ask_followup(input: FollowUpInput):
+    try:
+        prompt = (
+            f"The user had a question about the code:\n\n{input.code}\n\n"
+            f"Previous explanation:\n\n{input.explanation}\n\n"
+            f"User's question:\n\"{input.question}\"\n"
+            "Please clarify or expand to help the user understand clearly."
+        )
+
+        response = requests.post(
+            "https://api.together.xyz/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {os.environ['TOGETHER_API_KEY']}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "mistralai/Mistral-7B-Instruct-v0.2",
+                "max_tokens": 300,
+                "temperature": 0.4,
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            verify=False
+        )
+
+        answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Sorry, no answer generated.")
+        return {"answer": answer}
+
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# Optional Whisper section removed for lightweight deployment. Recommend splitting to AWS Lambda.
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
